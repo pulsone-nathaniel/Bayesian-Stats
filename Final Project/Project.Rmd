@@ -1,0 +1,213 @@
+---
+title: "Final Project"
+author: "Nathaniel Pulsone"
+date: "2025-12-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sigmoid)
+library(glmnet)
+library(rstan)
+library(coda)
+library(bayesplot)
+library(MASS)
+library(brms)
+```
+
+```{r Data}
+setwd("C:/Users/njp09/Documents/Notes/6 - Fall 2025/Bayesian Stats/Final Project")
+df = read.csv("diabetes.csv")
+
+# response variable
+y = df$DiabetesPedigreeFunction
+
+n = length(y)
+p = 7
+# predictor variables
+preg = df$Pregnancies
+gluc = df$Glucose
+bp = df$BloodPressure
+st = df$SkinThickness
+ins = df$Insulin
+bmi = df$BMI
+age = df$Age
+
+head(cbind(preg, gluc, bp, bmi, age, y))
+
+X = cbind(1, preg, gluc, bp, st, ins, bmi, age)
+rm(preg, gluc, bp, st, ins, bmi, age)
+```
+
+```{r}
+# Initial Data Visualization
+hist(y, main = "Histogram of Diabetes Pedigree")
+hist(gluc, main = "Histogram of Glucose Levels")
+hist(bmi, main = "Histogram of Body Mass Index")
+hist(bp, main = "Histogram of Blood Pressure")
+
+```
+
+```{r}
+# helper functions
+SSRgz = function(z){
+  Xz = X[,which(z == 1)]
+  pz = sum(z)
+  result = t(y)%*%(diag(1, n) - g/(g+1) * Xz%*%solve(t(Xz)%*%Xz)%*%t(Xz))%*%y
+  return(result)
+}
+
+log_py = function(z){
+  pz = sum(z)
+  SSR = SSRgz(z)
+  
+  result = 
+    -n/2 * log(pi) * lgamma((nu_0 + n)/2) - lgamma(nu_0/2) -
+    pz/2 * log(1 + g) + nu_0/2 * log(nu_0*sig2_0) -
+    (nu_0 +n)/2 * log(nu_0*sig2_0 + SSR)
+  
+  return(result)
+}
+
+# priors
+g = n
+nu_0 = 1
+sig2_0 = 5
+
+iters = 1000
+
+# samples
+z = rbind(c(1, rbinom(p, 1, 0.5)))
+beta = rbind(rep(0, p+1))
+sig2 = c()
+```
+
+```{r}
+# Gibbs Algorithm
+for(s in 1:iters){
+  z_curr = as.numeric(z[s,])
+  for(j in 2:(p+1)){
+    z_in = z_curr
+    z_in[j] = 1
+    
+    z_out = z_curr
+    z_out[j] = 0
+    
+    log_oj = log_py(z_in) - log_py(z_out)
+    
+    pr = sigmoid(log_oj)
+      
+    z_curr[j] = rbinom(1, 1, pr)
+  }
+  
+  z = rbind(z, z_curr)
+  
+  Xz = X[,which(z_curr == 1)]
+  SSR = SSRgz(z_curr)
+  bhz = solve(t(Xz)%*%Xz)%*%t(Xz)%*%y
+  
+  sig2_curr = 1/rgamma(1, (nu_0 +n)/2, (nu_0*sig2_0 + SSR)/2)
+  sig2 = c(sig2, sig2_curr)
+  
+  Sigma = g/(g+1) * sig2_curr * solve(t(Xz)%*%Xz)
+  bz = mvrnorm(1, g/(g+1) * bhz, Sigma)
+  
+  beta_curr = c()
+  for(j in 1:(p+1)){
+    k = 1
+    if(z_curr[j] == 1){
+      beta_curr = c(beta_curr, bz[k])
+      k = k+1
+    }
+    else{
+      beta_curr = c(beta_curr, 0)
+    }
+  }
+  beta = rbind(beta, beta_curr)
+}
+```
+
+```{r}
+# Sensitivity Analysis
+z_MPM = c(1, 3, 5, 6)
+X_MPM = X[,z_MPM]
+
+n_prior = c(1, 2, 4, 8, 16, 32, 64, 128)
+sig_prior = c(0.1, 0.5, 1, 2.5, 5.0, 7.5, 10.0)
+
+g_prior = n / n_prior
+
+g = n/0.5
+b_hats = g/(g+1)*solve(t(X_MPM)%*%X_MPM)%*%t(X_MPM)%*%y
+
+for(i in 1:8){
+  g = g_prior[i]
+  b_h = g/(g+1)*solve(t(X_MPM)%*%X_MPM)%*%t(X_MPM)%*%y
+  b_hats = cbind(b_hats, b_h)
+}
+
+n_prior = c(0.5, n_prior)
+
+par(mfrow = c(2,2))
+plot(n_prior, b_hats[1,], ylab = "Inctercept")
+plot(n_prior, b_hats[2,], ylab = "Glucose")
+plot(n_prior, b_hats[3,], ylab = "Skin Thickness")
+plot(n_prior, b_hats[4,], ylab = "Insulin")
+
+```
+
+```{r}
+# posterior predictive checking
+dat = cbind(X, y)
+
+fit = brm(y ~ gluc + st + ins, data = dat)
+pp_check(fit)
+```
+
+
+```{r}
+# Diagnostics and Results
+
+# PIP
+PIP = c(mean(z[,1]),
+      mean(z[,2]),
+      mean(z[,3]),
+      mean(z[,4]),
+      mean(z[,5]),
+      mean(z[,6]),
+      mean(z[,7]),
+      mean(z[,8])
+      )
+
+# Posterior Expectations
+cbind(mean(beta[,1]),
+      mean(beta[,2]),
+      mean(beta[,3]),
+      mean(beta[,4]),
+      mean(beta[,5]),
+      mean(beta[,6]),
+      mean(beta[,7]),
+      mean(beta[,8])
+      )
+
+# Posterior Standard Deviation
+cbind(sd(beta[,1]),
+      sd(beta[,2]),
+      sd(beta[,3]),
+      sd(beta[,4]),
+      sd(beta[,5]),
+      sd(beta[,6]),
+      sd(beta[,7]),
+      sd(beta[,8])
+      )
+
+# Diagnostic plots
+sim = matrix(cbind(beta[2:1001,], sig2), ncol = 9)
+colnames(sim) = c("Intercept", "Pregnancies", "Glucose", "Blood Pressure", "Skin Thickness", "Insulin", "BMI", "Age", "sigma^2")
+sim = as.mcmc(sim)
+mcmc_acf(sim)
+mcmc_trace(sim)
+mcmc_dens(sim)
+effectiveSize(sim)
+```

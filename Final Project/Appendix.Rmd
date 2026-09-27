@@ -1,0 +1,124 @@
+---
+title: "Final Project Appendix (code)"
+author: "Nathaniel Pulsone"
+date: "2025-12-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+library(sigmoid)
+library(glmnet)
+library(rstan)
+library(coda)
+library(bayesplot)
+library(MASS)
+library(brms)
+```
+
+The following is R code that was used to perform Gibbs sampling and analysis for the study.
+
+```{r}
+# Load data
+setwd("C:/Users/njp09/Documents/Notes/6 - Fall 2025/Bayesian Stats/Final Project")
+df = read.csv("diabetes.csv")
+
+# response variable
+y = df$DiabetesPedigreeFunction
+
+n = length(y)
+p = 7
+
+# predictor variables
+preg = df$Pregnancies
+gluc = df$Glucose
+bp = df$BloodPressure
+st = df$SkinThickness
+ins = df$Insulin
+bmi = df$BMI
+age = df$Age
+
+X = cbind(1, preg, gluc, bp, st, ins, bmi, age)
+rm(preg, gluc, bp, st, ins, bmi, age)
+```
+
+
+```{r}
+# helper functions
+SSRgz = function(z){
+  Xz = X[,which(z == 1)]
+  pz = sum(z)
+  result = t(y)%*%(diag(1, n) - g/(g+1) * Xz%*%solve(t(Xz)%*%Xz)%*%t(Xz))%*%y
+  return(result)
+}
+
+log_py = function(z){
+  pz = sum(z)
+  SSR = SSRgz(z)
+  
+  result = 
+    -n/2 * log(pi) * lgamma((nu_0 + n)/2) - lgamma(nu_0/2) -
+    pz/2 * log(1 + g) + nu_0/2 * log(nu_0*sig2_0) -
+    (nu_0 +n)/2 * log(nu_0*sig2_0 + SSR)
+  
+  return(result)
+}
+
+# priors
+g = n
+nu_0 = 1
+sig2_0 = 5
+
+iters = 1000
+
+# samples
+z = rbind(c(1, rbinom(p, 1, 0.5)))
+beta = rbind(rep(0, p+1))
+sig2 = c()
+```
+
+```{r}
+# Gibbs Sampling Algorithm
+for(s in 1:iters){
+  z_curr = as.numeric(z[s,])
+  for(j in 2:(p+1)){
+    z_in = z_curr
+    z_in[j] = 1
+    
+    z_out = z_curr
+    z_out[j] = 0
+    
+    log_oj = log_py(z_in) - log_py(z_out)
+    
+    pr = sigmoid(log_oj)
+      
+    z_curr[j] = rbinom(1, 1, pr)
+  }
+  
+  z = rbind(z, z_curr)
+  
+  Xz = X[,which(z_curr == 1)]
+  SSR = SSRgz(z_curr)
+  bhz = solve(t(Xz)%*%Xz)%*%t(Xz)%*%y
+  
+  sig2_curr = 1/rgamma(1, (nu_0 +n)/2, (nu_0*sig2_0 + SSR)/2)
+  sig2 = c(sig2, sig2_curr)
+  
+  Sigma = g/(g+1) * sig2_curr * solve(t(Xz)%*%Xz)
+  bz = mvrnorm(1, g/(g+1) * bhz, Sigma)
+  
+  beta_curr = c()
+  for(j in 1:(p+1)){
+    k = 1
+    if(z_curr[j] == 1){
+      beta_curr = c(beta_curr, bz[k])
+      k = k+1
+    }
+    else{
+      beta_curr = c(beta_curr, 0)
+    }
+  }
+  beta = rbind(beta, beta_curr)
+}
+```

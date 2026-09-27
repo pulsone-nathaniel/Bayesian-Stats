@@ -1,0 +1,11 @@
+Goal: 
+	General: study the relationship between biometric data and patient history and one's risk for diabetes
+	Data: present data table, source, values
+	Scope: Create a Bayesian logistic regression model to classify and predict whether a woman has diabetes based on their known data
+	Method:
+		Split data into training and testing
+		Use variable selection to find a selection of candidate models
+		Use Stan to estimate posterior for subset models, analyze diagnostics, compare contrast
+		Judge predictive performance in classification 
+	Interpretation
+	Analysis, conclusions, weaknesses, etc.
